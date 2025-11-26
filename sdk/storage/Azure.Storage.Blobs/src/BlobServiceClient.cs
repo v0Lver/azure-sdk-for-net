@@ -72,7 +72,7 @@ namespace Azure.Storage.Blobs
         /// <summary>
         /// Gets the Storage account name corresponding to the service client.
         /// </summary>
-        public string AccountName
+        public virtual string AccountName
         {
             get
             {
@@ -1611,12 +1611,12 @@ namespace Azure.Storage.Blobs
 
                     if (startsOn.HasValue && startsOn.Value.Offset != TimeSpan.Zero)
                     {
-                        throw BlobErrors.InvalidDateTimeUtc(nameof(startsOn));
+                        throw Errors.InvalidDateTimeUtc(nameof(startsOn));
                     }
 
                     if (expiresOn.Offset != TimeSpan.Zero)
                     {
-                        throw BlobErrors.InvalidDateTimeUtc(nameof(expiresOn));
+                        throw Errors.InvalidDateTimeUtc(nameof(expiresOn));
                     }
 
                     KeyInfo keyInfo = new KeyInfo(expiresOn.ToString(Constants.Iso8601Format, CultureInfo.InvariantCulture))

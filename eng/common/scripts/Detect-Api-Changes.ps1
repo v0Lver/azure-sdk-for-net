@@ -55,11 +55,21 @@ function Submit-Request($filePath, $packageName)
     }
     $uri = [System.UriBuilder]$APIViewUri
     $uri.query = $query.toString()
+
+    $correlationId = [System.Guid]::NewGuid().ToString()
+    $headers = @{
+      "x-correlation-id" = $correlationId
+    }
     LogInfo "Request URI: $($uri.Uri.OriginalString)"
+    LogInfo "Correlation ID: $correlationId"
     try
     {
-        $Response = Invoke-WebRequest -Method 'GET' -Uri $uri.Uri -MaximumRetryCount 3
+        $Response = Invoke-WebRequest -Method 'GET' -Uri $uri.Uri -Headers $headers -MaximumRetryCount 3
         $StatusCode = $Response.StatusCode
+        if ($Response.Headers['Content-Type'] -like 'application/json*') {
+            $responseContent = $Response.Content | ConvertFrom-Json | ConvertTo-Json -Depth 10
+            LogSuccess $responseContent
+        }
     }
     catch
     {
@@ -70,22 +80,13 @@ function Submit-Request($filePath, $packageName)
     return $StatusCode
 }
 
-function Should-Process-Package($pkgPath, $packageName)
+function Should-Process-Package($packageInfo)
 {
-    $pkg = Split-Path -Leaf $pkgPath
-    $pkgPropPath = Join-Path -Path $configFileDir "$packageName.json"
-    if (!(Test-Path $pkgPropPath))
-    {
-        LogWarning "Package property file path $($pkgPropPath) is invalid."
-        return $False
-    }
-    # Get package info from json file created before updating version to daily dev
-    $pkgInfo = Get-Content $pkgPropPath | ConvertFrom-Json
-    $packagePath = $pkgInfo.DirectoryPath
+    $packagePath = $packageInfo.DirectoryPath
     $modifiedFiles  = @(Get-ChangedFiles -DiffPath "$packagePath/*" -DiffFilterType '')
     $filteredFileCount = $modifiedFiles.Count
     LogInfo "Number of modified files for package: $filteredFileCount"
-    return ($filteredFileCount -gt 0 -and $pkgInfo.IsNewSdk)
+    return ($filteredFileCount -gt 0 -and $packageInfo.IsNewSdk)
 }
 
 function Log-Input-Params()
@@ -116,24 +117,42 @@ $responses = @{}
 
 LogInfo "Processing PackageInfo at $configFileDir"
 
-$packageProperties = Get-ChildItem -Recurse -Force "$configFileDir" `
-  | Where-Object { 
+$packageInfoFiles = Get-ChildItem -Recurse -Force "$configFileDir" `
+  | Where-Object {
       $_.Extension -eq '.json' -and ($_.FullName.Substring($configFileDir.Length + 1) -notmatch '^_.*?[\\\/]')
     }
 
-foreach ($packagePropFile in $packageProperties)
+foreach ($packageInfoFile in $packageInfoFiles)
 {
-    $packageMetadata = Get-Content $packagePropFile | ConvertFrom-Json
-    $pkgArtifactName = $packageMetadata.ArtifactName ?? $packageMetadata.Name
+    $packageInfo = Get-Content $packageInfoFile | ConvertFrom-Json
+    $pkgArtifactName = $packageInfo.ArtifactName ?? $packageInfo.Name
 
     LogInfo "Processing $($pkgArtifactName)"
 
-    $packages = &$FindArtifactForApiReviewFn $ArtifactPath $pkgArtifactName
+    # Check if the function supports the packageInfo parameter
+    $functionInfo = Get-Command $FindArtifactForApiReviewFn -ErrorAction SilentlyContinue
+    $supportsPackageInfoParam = $false
+    
+    if ($functionInfo -and $functionInfo.Parameters) {
+        # Check if function specifically supports packageInfo parameter
+        $parameterNames = $functionInfo.Parameters.Keys
+        $supportsPackageInfoParam = $parameterNames -contains 'packageInfo'
+    }
+    
+    # Call function with appropriate parameters
+    if ($supportsPackageInfoParam) {
+        LogInfo "Calling $FindArtifactForApiReviewFn with packageInfo parameter"
+        $packages = &$FindArtifactForApiReviewFn $ArtifactPath $pkgArtifactName $packageInfo
+    }
+    else {
+        LogInfo "Calling $FindArtifactForApiReviewFn with legacy parameters"
+        $packages = &$FindArtifactForApiReviewFn $ArtifactPath $pkgArtifactName
+    }
 
     if ($packages)
     {
         $pkgPath = $packages.Values[0]
-        $isRequired = Should-Process-Package -pkgPath $pkgPath -packageName $pkgArtifactName
+        $isRequired = Should-Process-Package $packageInfo
         LogInfo "Is API change detect required for $($pkgArtifactName):$($isRequired)"
         if ($isRequired -eq $True)
         {
@@ -146,7 +165,7 @@ foreach ($packagePropFile in $packageProperties)
         }
         else
         {
-            LogInfo "Pull request does not have any change for $($pkgArtifactName)). Skipping API change detect."
+            LogInfo "Pull request does not have any change for $($pkgArtifactName). Skipping API change detect."
         }
     }
     else

@@ -11,7 +11,7 @@ using Azure.Storage.Common;
 
 namespace Azure.Storage.DataMovement
 {
-    internal class ServiceToServiceJobPart : JobPartInternal, IAsyncDisposable
+    internal class ServiceToServiceJobPart : JobPartInternal
     {
         public delegate Task CommitBlockTaskInternal(CancellationToken cancellationToken);
         public CommitBlockTaskInternal CommitBlockTask { get; internal set; }
@@ -89,11 +89,6 @@ namespace Azure.Storage.DataMovement
         {
         }
 
-        public async ValueTask DisposeAsync()
-        {
-            await DisposeHandlersAsync().ConfigureAwait(false);
-        }
-
         /// <summary>
         /// Called when creating a job part from a container transfer.
         /// </summary>
@@ -154,6 +149,12 @@ namespace Azure.Storage.DataMovement
                     return;
                 }
                 await OnTransferStateChangedAsync(TransferState.InProgress).ConfigureAwait(false);
+
+                if (!await _sourceResource.ShouldItemTransferAsync(_cancellationToken).ConfigureAwait(false))
+                {
+                    await OnTransferStateChangedAsync(TransferState.Completed).ConfigureAwait(false);
+                    return;
+                }
 
                 StorageResourceItemProperties sourceProperties =
                     await _sourceResource.GetPropertiesAsync(_cancellationToken).ConfigureAwait(false);
@@ -320,7 +321,7 @@ namespace Azure.Storage.DataMovement
                     cancellationToken: _cancellationToken).ConfigureAwait(false);
 
                 // Dispose the handlers
-                await DisposeHandlersAsync().ConfigureAwait(false);
+                await CleanUpHandlersAsync().ConfigureAwait(false);
 
                 // Set completion status to completed
                 await OnTransferStateChangedAsync(TransferState.Completed).ConfigureAwait(false);
@@ -433,11 +434,11 @@ namespace Azure.Storage.DataMovement
             await base.InvokeFailedArgAsync(ex).ConfigureAwait(false);
         }
 
-        public override async Task DisposeHandlersAsync()
+        public override async Task CleanUpHandlersAsync()
         {
             if (_commitBlockHandler != default)
             {
-                await _commitBlockHandler.DisposeAsync().ConfigureAwait(false);
+                await _commitBlockHandler.CleanUpAsync().ConfigureAwait(false);
                 _commitBlockHandler = null;
             }
         }

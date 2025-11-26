@@ -83,7 +83,7 @@ namespace Azure.Storage.DataMovement.Tests
             int numberOfInvocationCalls = 1,
             int maxWaitTimeInSec = 6)
         {
-            CancellationTokenSource cancellationSource = new CancellationTokenSource(TimeSpan.FromSeconds(maxWaitTimeInSec));
+            using CancellationTokenSource cancellationSource = new CancellationTokenSource(TimeSpan.FromSeconds(maxWaitTimeInSec));
             CancellationToken cancellationToken = cancellationSource.Token;
             bool verified = false;
 
@@ -129,6 +129,8 @@ namespace Azure.Storage.DataMovement.Tests
                 .Returns(Task.FromResult(properties));
             mockSource.Setup(r => r.GetCopyAuthorizationHeaderAsync(It.IsAny<CancellationToken>()))
                 .Returns(Task.FromResult(httpAuthorization));
+            mockSource.Setup(b => b.ShouldItemTransferAsync(It.IsAny<CancellationToken>()))
+                .Returns(Task.FromResult(true));
 
             // Set up Destination to copy in one shot with a large chunk size and smaller total length.
             Mock<StorageResourceItem> mockDestination = GetStorageResourceItem();
@@ -202,6 +204,8 @@ namespace Azure.Storage.DataMovement.Tests
             StorageResourceItemProperties properties = GetResourceProperties(length);
             mockSource.Setup(r => r.GetPropertiesAsync(It.IsAny<CancellationToken>()))
                 .Returns(Task.FromResult(properties));
+            mockSource.Setup(b => b.ShouldItemTransferAsync(It.IsAny<CancellationToken>()))
+                .Returns(Task.FromResult(true));
 
             // Setup destination with small chunk size and a larger source total length
             // to cause chunked copy
